@@ -1,11 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "vips", "pkg-config"]
+nixPkgs = ["nodejs_20", "vips", "pkg-config", "librsvg", "inkscape"]
 
 [phases.install]
 cmds = ["npm install"]
-
-[phases.build]
-cmds = []
 
 [start]
 cmd = "node index.js"
