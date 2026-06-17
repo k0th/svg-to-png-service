@@ -1,24 +1,34 @@
 const express = require('express');
-const { execSync, exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const puppeteer = require('puppeteer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const TMP = '/tmp';
 
 app.use(express.json({ limit: '50mb' }));
 
+let browser;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    });
+  }
+  return browser;
+}
+
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'SVG to PNG converter running 🚀' });
+  res.json({ status: 'ok', message: 'SVG to PNG converter (Puppeteer) 🚀' });
 });
 
 app.post('/convert/base64', async (req, res) => {
-  const id = crypto.randomBytes(8).toString('hex');
-  const svgPath = path.join(TMP, `${id}.svg`);
-  const pngPath = path.join(TMP, `${id}.png`);
-
+  let page;
   try {
     const { svg, width = 1000, height = 1250 } = req.body;
 
@@ -26,7 +36,7 @@ app.post('/convert/base64', async (req, res) => {
       return res.status(400).json({ error: 'Falta el campo svg' });
     }
 
-    // Decodificar el SVG (puede venir en base64 o texto plano)
+    // Decodificar base64 si es necesario
     let svgString;
     try {
       const decoded = Buffer.from(svg, 'base64').toString('utf-8');
@@ -35,69 +45,45 @@ app.post('/convert/base64', async (req, res) => {
       svgString = svg;
     }
 
-    // Guardar SVG en disco
-    fs.writeFileSync(svgPath, svgString, 'utf-8');
+    // Crear HTML que contiene el SVG
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: ${width}px; height: ${height}px; overflow: hidden; background: white; }
+  svg { display: block; }
+</style>
+</head>
+<body>${svgString}</body>
+</html>`;
 
-    // Intentar con sharp primero
-    try {
-      const sharp = require('sharp');
-      const pngBuffer = await sharp(svgPath)
-        .resize(width, height, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
-        .png()
-        .toBuffer();
+    const b = await getBrowser();
+    page = await b.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: 1 });
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
 
-      cleanup(svgPath, pngPath);
-      return res.json({
-        success: true,
-        png_base64: pngBuffer.toString('base64'),
-        mime_type: 'image/png',
-        filename: 'menu.png'
-      });
-    } catch (sharpErr) {
-      console.log('sharp falló, intentando con Inkscape:', sharpErr.message);
-    }
+    const pngBuffer = await page.screenshot({
+      type: 'png',
+      clip: { x: 0, y: 0, width, height }
+    });
 
-    // Fallback: Inkscape
-    try {
-      execSync(`inkscape "${svgPath}" --export-type=png --export-filename="${pngPath}" --export-width=${width} --export-height=${height}`, { timeout: 30000 });
-      const pngBuffer = fs.readFileSync(pngPath);
-      cleanup(svgPath, pngPath);
-      return res.json({
-        success: true,
-        png_base64: pngBuffer.toString('base64'),
-        mime_type: 'image/png',
-        filename: 'menu.png'
-      });
-    } catch (inkErr) {
-      console.log('Inkscape falló:', inkErr.message);
-    }
+    await page.close();
 
-    // Fallback: rsvg-convert
-    try {
-      execSync(`rsvg-convert -w ${width} -h ${height} -o "${pngPath}" "${svgPath}"`, { timeout: 30000 });
-      const pngBuffer = fs.readFileSync(pngPath);
-      cleanup(svgPath, pngPath);
-      return res.json({
-        success: true,
-        png_base64: pngBuffer.toString('base64'),
-        mime_type: 'image/png',
-        filename: 'menu.png'
-      });
-    } catch (rsvgErr) {
-      console.log('rsvg-convert falló:', rsvgErr.message);
-      throw new Error('Ningún convertidor pudo procesar el SVG');
-    }
+    return res.json({
+      success: true,
+      png_base64: pngBuffer.toString('base64'),
+      mime_type: 'image/png',
+      filename: 'menu.png'
+    });
 
   } catch (err) {
-    cleanup(svgPath, pngPath);
-    console.error('Error general:', err.message);
+    if (page) await page.close().catch(() => {});
+    console.error('Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
-
-function cleanup(...files) {
-  files.forEach(f => { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {} });
-}
 
 app.listen(PORT, () => {
   console.log(`✅ Servidor corriendo en puerto ${PORT}`);
