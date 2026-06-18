@@ -1,5 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
+const https = require('https');
+const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,6 +25,49 @@ async function getBrowser() {
   return browser;
 }
 
+// Descarga una URL y la convierte a base64
+function fetchImageAsBase64(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
+    client.get(url, (res) => {
+      // Seguir redirecciones
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return fetchImageAsBase64(res.headers.location).then(resolve).catch(reject);
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const mime = res.headers['content-type'] || 'image/png';
+        const b64 = Buffer.concat(chunks).toString('base64');
+        resolve('data:' + mime + ';base64,' + b64);
+      });
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
+
+// Reemplaza todas las URLs externas en el SVG por base64
+async function resolveExternalImages(svgString) {
+  const regex = /href="(https?:\/\/[^"]+)"/g;
+  const matches = [];
+  let match;
+  while ((match = regex.exec(svgString)) !== null) {
+    matches.push({ full: match[0], url: match[1] });
+  }
+
+  for (const m of matches) {
+    try {
+      console.log('Descargando imagen:', m.url);
+      const dataUrl = await fetchImageAsBase64(m.url);
+      svgString = svgString.replace(m.url, dataUrl);
+      console.log('Imagen incrustada OK');
+    } catch(e) {
+      console.log('No se pudo resolver imagen:', m.url, e.message);
+    }
+  }
+  return svgString;
+}
+
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'SVG to PNG converter (Puppeteer) 🚀' });
 });
@@ -44,6 +89,9 @@ app.post('/convert/base64', async (req, res) => {
     } catch {
       svgString = svg;
     }
+
+    // Resolver imágenes externas incrustándolas en base64
+    svgString = await resolveExternalImages(svgString);
 
     // Crear HTML que contiene el SVG
     const html = `<!DOCTYPE html>
