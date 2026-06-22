@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'SVG to PNG converter (resvg v2) 🚀' });
+  res.json({ status: 'ok', message: 'SVG to PNG converter (resvg v3) 🚀' });
 });
 
 function fetchBuffer(url) {
@@ -57,30 +57,19 @@ app.post('/convert/base64', async (req, res) => {
       return res.status(400).json({ error: 'Falta el campo svg' });
     }
 
-    // Intentar decodificar — soporta base64 normal y base64 de URI encoded
-    let svgString;
-    try {
-      const decoded = Buffer.from(svg, 'base64').toString('utf-8');
-      // Verificar si es URI encoded
-      if (decoded.startsWith('%3C') || decoded.startsWith('%3c')) {
-        svgString = decodeURIComponent(decoded);
-      } else if (decoded.trimStart().startsWith('<')) {
-        svgString = decoded;
-      } else {
-        // Intentar como URI encoded directo
-        try {
-          svgString = decodeURIComponent(svg);
-        } catch {
-          svgString = decoded;
-        }
-      }
-    } catch {
-      svgString = svg;
+    // Decodificar base64 simple
+    let svgString = Buffer.from(svg, 'base64').toString('utf-8');
+
+    console.log('SVG inicio:', JSON.stringify(svgString.substring(0, 100)));
+
+    // Verificar que empiece con <svg
+    if (!svgString.trimStart().startsWith('<svg') && !svgString.trimStart().startsWith('<SVG')) {
+      return res.status(400).json({ 
+        error: 'El contenido no es un SVG valido. Inicio: ' + JSON.stringify(svgString.substring(0, 80))
+      });
     }
 
-    console.log('SVG inicio:', svgString.substring(0, 80));
-
-    // Resolver imágenes externas
+    // Resolver imagenes externas
     svgString = await resolveExternalImages(svgString);
 
     // Convertir con resvg
@@ -107,5 +96,5 @@ app.post('/convert/base64', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en puerto ${PORT}`);
+  console.log('Servidor corriendo en puerto ' + PORT);
 });
