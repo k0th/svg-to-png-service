@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_20", "liberation_ttf", "fontconfig"]
 
 [phases.install]
-cmds = ["npm install"]
+cmds = ["npm install", "fc-cache -fv"]
 
 [start]
 cmd = "node index.js"
