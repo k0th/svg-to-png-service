@@ -8,8 +8,11 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 
+// Cache de fuente para no descargarla cada vez
+let fuenteBase64 = null;
+
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'SVG to PNG converter (resvg v3) 🚀' });
+  res.json({ status: 'ok', message: 'SVG to PNG converter (resvg v4) 🚀' });
 });
 
 function fetchBuffer(url) {
@@ -27,6 +30,20 @@ function fetchBuffer(url) {
   });
 }
 
+async function getFuenteBase64() {
+  if (fuenteBase64) return fuenteBase64;
+  try {
+    console.log('Descargando fuente...');
+    const buf = await fetchBuffer('https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Mu4mxK.woff2');
+    fuenteBase64 = buf.toString('base64');
+    console.log('Fuente descargada OK - bytes:', buf.length);
+  } catch(e) {
+    console.log('Error descargando fuente:', e.message);
+    fuenteBase64 = null;
+  }
+  return fuenteBase64;
+}
+
 async function resolveExternalImages(svgString) {
   const regex = /href="(https?:\/\/[^"]+)"/g;
   const matches = [];
@@ -36,7 +53,7 @@ async function resolveExternalImages(svgString) {
   }
   for (const m of matches) {
     try {
-      console.log('Descargando:', m.url);
+      console.log('Descargando imagen:', m.url);
       const buf = await fetchBuffer(m.url);
       const mime = m.url.includes('.jpg') || m.url.includes('.jpeg') ? 'image/jpeg' : 'image/png';
       const b64 = buf.toString('base64');
@@ -49,6 +66,19 @@ async function resolveExternalImages(svgString) {
   return svgString;
 }
 
+function inyectarFuente(svgString, fuenteB64) {
+  if (!fuenteB64) return svgString;
+  const styleTag = '<defs><style>'
+    + '@font-face {'
+    + 'font-family: "Roboto";'
+    + 'src: url("data:font/woff2;base64,' + fuenteB64 + '") format("woff2");'
+    + 'font-weight: normal;'
+    + '}'
+    + '</style></defs>';
+  // Insertar después del tag <svg...>
+  return svgString.replace(/(<svg[^>]*>)/, '$1' + styleTag);
+}
+
 app.post('/convert/base64', async (req, res) => {
   try {
     const { svg, width = 1000, height = 1250 } = req.body;
@@ -57,22 +87,26 @@ app.post('/convert/base64', async (req, res) => {
       return res.status(400).json({ error: 'Falta el campo svg' });
     }
 
-    // Decodificar base64 simple
     let svgString = Buffer.from(svg, 'base64').toString('utf-8');
 
-    console.log('SVG inicio:', JSON.stringify(svgString.substring(0, 100)));
-
-    // Verificar que empiece con <svg
     if (!svgString.trimStart().startsWith('<svg') && !svgString.trimStart().startsWith('<SVG')) {
-      return res.status(400).json({ 
-        error: 'El contenido no es un SVG valido. Inicio: ' + JSON.stringify(svgString.substring(0, 80))
+      return res.status(400).json({
+        error: 'No es SVG valido. Inicio: ' + JSON.stringify(svgString.substring(0, 80))
       });
     }
 
     // Resolver imagenes externas
     svgString = await resolveExternalImages(svgString);
 
-    // Convertir con resvg
+    // Inyectar fuente Roboto
+    const fuente = await getFuenteBase64();
+    svgString = inyectarFuente(svgString, fuente);
+
+    // Reemplazar font-family por Roboto
+    svgString = svgString.replace(/font-family="[^"]+"/g, 'font-family="Roboto, sans-serif"');
+
+    console.log('Convirtiendo SVG...');
+
     const resvg = new Resvg(svgString, {
       fitTo: { mode: 'width', value: width }
     });
@@ -97,4 +131,6 @@ app.post('/convert/base64', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log('Servidor corriendo en puerto ' + PORT);
+  // Pre-cargar la fuente al iniciar
+  getFuenteBase64();
 });
