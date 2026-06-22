@@ -1,14 +1,14 @@
 {
   "name": "svg-to-png-service",
-  "version": "3.0.0",
-  "description": "SVG a PNG con resvg-js",
+  "version": "5.0.0",
+  "description": "SVG a PNG con node-canvas",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "@resvg/resvg-js": "^2.6.0"
+    "canvas": "^2.11.2"
   },
   "engines": {
     "node": ">=18.0.0"
